@@ -142,8 +142,13 @@ pip install -r requirements.txt
 flask run
 ```
 
-### 啟動前端
+### 3. 啟動前端 (Frontend)
 ```bash
 cd frontend
-npm run dev
+
+# 安裝依賴套件
+npm install
+
+# 啟動開發伺服器 (建議綁定 127.0.0.1 以避免 Cookie 跨域問題)
+npm run dev -- --host 127.0.0.1
 ```

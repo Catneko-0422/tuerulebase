@@ -48,6 +48,7 @@ export default function RuleNode({ ruleId, parentId, onNodeSelect, level }: Rule
 
   const handleInputChange = (e: ChangeEvent<HTMLInputElement>) => {
     const node = nodes[0]; // Assuming only one INPUT node per level
+    if (!node) return;
     setInputValue(e.target.value);
 
     // Basic validation against segment length

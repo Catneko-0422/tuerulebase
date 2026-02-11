@@ -1,14 +1,18 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import Bar from '@/components/Bar';
 import type { CodingNode } from '@/types/rules';
 import { rulesService, type CreateNodePayload } from '@/services/rules';
+import { clearAuthCookies } from '@/lib/api';
+
+const MAX_CODE_LENGTH = 16;
 
 function OptionsModal({ ruleId, parentId, parentLength, onClose }: { ruleId: number, parentId: number, parentLength: number, onClose: () => void }) {
   const [options, setOptions] = useState<CodingNode[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [newOption, setNewOption] = useState({ name: '', code: '' });
   const [searchTerm, setSearchTerm] = useState('');
-  const [currentPage] = useState(1);
+  const [currentPage, setCurrentPage] = useState(1);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const itemsPerPage = 10;
 
   const fetchOptions = async () => {
@@ -31,10 +35,8 @@ function OptionsModal({ ruleId, parentId, parentLength, onClose }: { ruleId: num
   }, [ruleId, parentId]);
 
   useEffect(() => {
-    if (newOption.code) {
-      // No-op: parentLength is fixed from props, so we don't update it here for OptionsModal
-    }
-  }, [newOption.code]);
+    setCurrentPage(1);
+  }, [searchTerm]);
 
   const filteredOptions = useMemo(() => {
     return options.filter(opt => 
@@ -68,13 +70,73 @@ function OptionsModal({ ruleId, parentId, parentLength, onClose }: { ruleId: num
   };
 
   const handleDeleteOption = async (id: number) => {
-    if (!confirm('Delete this option?')) return;
+    const password = prompt('Please enter admin password to delete this option:');
+    if (!password) return;
     try {
-      await rulesService.deleteNode(id);
+      await rulesService.deleteNode(id, password);
       fetchOptions();
     } catch (error) {
       alert('Failed to delete option');
     }
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      const text = event.target?.result as string;
+      if (!text) return;
+
+      const lines = text.split(/\r?\n/);
+      let successCount = 0;
+      let failCount = 0;
+
+      setIsLoading(true);
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (!line) continue;
+
+        // 跳過標題行 (如果有的話)
+        if (i === 0 && (line.toLowerCase().includes('name') && line.toLowerCase().includes('code'))) {
+          continue;
+        }
+
+        const parts = line.split(',');
+        if (parts.length < 2) {
+          failCount++;
+          continue;
+        }
+
+        const name = parts[0].trim();
+        const code = parts[1].trim();
+
+        try {
+          await rulesService.createNode({
+            rule_id: ruleId,
+            parent_id: parentId,
+            name: name,
+            code: code,
+            segment_length: parentLength,
+            node_type: 'OPTION'
+          });
+          successCount++;
+        } catch (error) {
+          console.error(`Failed to import line: ${line}`, error);
+          failCount++;
+        }
+      }
+
+      setIsLoading(false);
+      alert(`Import completed.\nSuccess: ${successCount}\nFailed: ${failCount}`);
+      fetchOptions();
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    };
+    reader.readAsText(file);
   };
 
   return (
@@ -85,10 +147,28 @@ function OptionsModal({ ruleId, parentId, parentLength, onClose }: { ruleId: num
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600">✕</button>
         </div>
         
-        <form onSubmit={handleAddOption} className="flex gap-2 mb-6">
-          <input required placeholder="Name (e.g. Chip Resistor)" className="border p-2 rounded flex-1" value={newOption.name} onChange={e => setNewOption({...newOption, name: e.target.value})} />
-          <input required placeholder="Code (e.g. 03)" className="border p-2 rounded w-24" value={newOption.code} onChange={e => setNewOption({...newOption, code: e.target.value})} />
-          <button type="submit" className="bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700">Add</button>
+        <form onSubmit={handleAddOption} className="flex flex-col gap-2 mb-6">
+          <div className='flex gap-2'>
+            <input required placeholder="Name (e.g. Chip Resistor)" className="border p-2 rounded flex-1" value={newOption.name} onChange={e => setNewOption({...newOption, name: e.target.value})} />
+            <input required placeholder="Code (e.g. 03)" className="border p-2 rounded w-24" value={newOption.code} onChange={e => setNewOption({...newOption, code: e.target.value})} />
+            <button type="submit" className="bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700">Add</button>
+            
+            <input 
+              type="file" 
+              ref={fileInputRef} 
+              className="hidden" 
+              accept=".csv" 
+              onChange={handleFileUpload} 
+            />
+          </div>
+          <button 
+            type="button" 
+            onClick={() => fileInputRef.current?.click()} 
+            className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 whitespace-nowrap"
+            title="CSV Format: Name,Code"
+          >
+            Import CSV
+          </button>
         </form>
         
         <div className="mb-4">
@@ -112,6 +192,26 @@ function OptionsModal({ ruleId, parentId, parentLength, onClose }: { ruleId: num
           ))}
           {!isLoading && filteredOptions.length === 0 && <div className="text-center text-slate-400">No options found.</div>}
         </div>
+
+        {totalPages > 1 && (
+          <div className="flex justify-between items-center mt-4 pt-4 border-t border-slate-100">
+            <button 
+              onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+              disabled={currentPage === 1}
+              className="px-3 py-1 text-sm border rounded hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Previous
+            </button>
+            <span className="text-sm text-slate-500">Page {currentPage} of {totalPages}</span>
+            <button 
+              onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+              disabled={currentPage === totalPages}
+              className="px-3 py-1 text-sm border rounded hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Next
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -150,7 +250,7 @@ function TreeNode({ node, onAddChild, onDelete, treeVersion, currentTotalLength,
     }
   }, [treeVersion]);
 
-  const isMaxLengthReached = currentTotalLength >= 16;
+  const isMaxLengthReached = currentTotalLength >= MAX_CODE_LENGTH;
 
   return (
     <div className="ml-6 border-l-2 border-slate-200 pl-4 py-2">
@@ -265,6 +365,8 @@ export default function RulesPage() {
   const [rootNodes, setRootNodes] = useState<CodingNode[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [treeVersion, setTreeVersion] = useState(0); // 用於觸發樹的重新整理
+  const [deleteTargetId, setDeleteTargetId] = useState<number | null>(null);
+  const [deletePassword, setDeletePassword] = useState('');
   
   // Form State
   const [formData, setFormData] = useState<CreateNodePayload>({
@@ -336,14 +438,32 @@ export default function RulesPage() {
     setIsModalOpen(true);
   };
 
-  const handleDeleteNode = async (id: number) => {
-    if (!confirm('確定要刪除此節點嗎？其所有子節點也會被刪除。')) return;
+  const handleDeleteNode = (id: number) => {
+    setDeleteTargetId(id);
+    setDeletePassword('');
+  };
+
+  const confirmDeleteNode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!deleteTargetId) return;
+
     try {
-      await rulesService.deleteNode(id);
+      await rulesService.deleteNode(deleteTargetId, deletePassword);
       // 透過更新版本號來觸發重新整理
       setTreeVersion(v => v + 1);
-    } catch (error) {
-      alert('刪除失敗');
+      setDeleteTargetId(null);
+    } catch (error: any) {
+      console.error("Delete failed", error);
+      // 偵測 401 或 CSRF 相關錯誤
+      if (error?.status === 401 && error?.message?.includes('password')) {
+        alert('密碼錯誤，無法刪除。');
+      } else if (error?.status === 401 || error?.message?.includes('CSRF') || error?.message?.includes('Missing')) {
+        clearAuthCookies();
+        alert('驗證失效 (Cookie 遺失或不匹配)。\n系統已自動清除舊資料。\n\n請點擊「確定」後重新登入。');
+        window.location.reload();
+      } else {
+        alert('刪除失敗，請檢查控制台日誌。');
+      }
     }
   };
 
@@ -404,7 +524,7 @@ export default function RulesPage() {
                 <select 
                   className="w-full border p-2 rounded disabled:bg-slate-100 disabled:text-slate-500" 
                   value={formData.node_type} 
-                  onChange={e => setFormData({...formData, node_type: e.target.value as any})}
+                  onChange={e => setFormData({...formData, node_type: e.target.value as CodingNode['node_type']})}
                 >
                   <option value="STATIC">固定選項 (STATIC)</option>
                   <option value="FIXED">固定值 (FIXED)</option>
@@ -432,6 +552,26 @@ export default function RulesPage() {
               <div className="flex justify-end gap-2 mt-6">
                 <button type="button" onClick={() => setIsModalOpen(false)} className="px-4 py-2 border rounded">取消</button>
                 <button type="submit" className="px-4 py-2 bg-indigo-600 text-white rounded">新增</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {deleteTargetId !== null && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6">
+            <h3 className="text-xl font-bold mb-4 text-red-600">確認刪除</h3>
+            <p className="text-slate-600 mb-4">此操作無法復原。請輸入您的管理員密碼以確認刪除。</p>
+            <form onSubmit={confirmDeleteNode} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium mb-1">管理員密碼</label>
+                <input type="password" required autoFocus className="w-full border p-2 rounded" value={deletePassword} onChange={e => setDeletePassword(e.target.value)} />
+              </div>
+              <div className="flex justify-end gap-2 mt-6">
+                <button type="button" onClick={() => setDeleteTargetId(null)} className="px-4 py-2 border rounded hover:bg-slate-50">取消</button>
+                <button type="submit" className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700">確認刪除</button>
               </div>
             </form>
           </div>

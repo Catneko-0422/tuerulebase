@@ -18,6 +18,13 @@ export interface CreateNodePayload {
   description?: string;
 }
 
+export interface DecodeSegment {
+  node_name: string;
+  value: string;
+  meaning: string;
+  type: string;
+}
+
 export const rulesService = {
   getRules: () => request<{ data: CodingRule[] }>('/coding-rules'),
   
@@ -45,11 +52,18 @@ export const rulesService = {
     });
   },
 
-  deleteNode: (nodeId: number, currentPassword?: string) => {
+  deleteNode: (nodeId: number, password: string) => {
     // 假設後端有實作 DELETE /coding-rules/nodes/:id
     return request<void>(`/coding-rules/nodes/${nodeId}`, { 
       method: 'DELETE',
-      body: JSON.stringify({ current_password: currentPassword })
+      body: JSON.stringify({ current_password: password })
+    });
+  },
+
+  decode: (code: string) => {
+    return request<{ data: DecodeSegment[] }>('/coding-rules/decode', {
+      method: 'POST',
+      body: JSON.stringify({ code })
     });
   },
 };
