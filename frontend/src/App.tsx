@@ -5,6 +5,7 @@ import UserManagementPage from '@/pages/Admin/UserManagementPage'
 import ChangePasswordPage from '@/pages/Auth/ChangePasswordPage'
 import RulesPage from '@/pages/Rules/RulesPage'
 import SingleDecodePage from '@/services/SingleDecodePage'
+import ManualCodingPage from '@/pages/Rules/ManualCodingPage'
 import { AuthProvider } from '@/contexts/AuthContext'
 import ProtectedRoute from '@/components/ProtectedRoute'
 
@@ -21,6 +22,7 @@ function App() {
             <Route path="/admin/users" element={<UserManagementPage />} />
             <Route path="/rules" element={<RulesPage />} />
             <Route path="/single-decode" element={<SingleDecodePage />} />
+            <Route path="/manual-coding" element={<ManualCodingPage />} />
             <Route path="/change-password" element={<ChangePasswordPage />} />
           </Route>
 

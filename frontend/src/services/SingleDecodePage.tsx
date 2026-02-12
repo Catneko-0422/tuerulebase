@@ -72,21 +72,17 @@ export default function SingleDecodePage() {
               <table className="w-full text-left border-collapse">
                 <thead>
                   <tr className="bg-slate-50 text-slate-600 text-sm">
-                    <th className="p-4 border-b font-medium">規則名稱 (Node)</th>
                     <th className="p-4 border-b font-medium">代碼值 (Value)</th>
+                    <th className="p-4 border-b font-medium">規則名稱 (Node)</th>
                     <th className="p-4 border-b font-medium">意義 (Meaning)</th>
-                    <th className="p-4 border-b font-medium">類型 (Type)</th>
                   </tr>
                 </thead>
                 <tbody>
                   {result.map((segment, index) => (
                     <tr key={index} className="hover:bg-slate-50 border-b last:border-b-0">
+                        <td className="p-4 font-mono text-indigo-600 bg-indigo-50/50">{segment.value}</td>
                       <td className="p-4 text-slate-800 font-medium">{segment.node_name}</td>
-                      <td className="p-4 font-mono text-indigo-600 bg-indigo-50/50">{segment.value}</td>
                       <td className="p-4 text-slate-700">{segment.meaning}</td>
-                      <td className="p-4 text-xs text-slate-500">
-                        <span className="bg-slate-100 px-2 py-1 rounded">{segment.type}</span>
-                      </td>
                     </tr>
                   ))}
                 </tbody>

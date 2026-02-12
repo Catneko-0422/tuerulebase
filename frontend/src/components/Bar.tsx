@@ -13,6 +13,7 @@ function Bar() {
         { label: '管理人員', path: '/admin/users', adminOnly: true },
         { label: '編輯規則', path: '/rules', adminOnly: true },
         { label: '自動編碼', path: '/auto-code' },
+        { label: '手動編碼', path: '/manual-coding' },
         { label: '單一解碼', path: '/single-decode' },
         { label: '批量解碼', path: '/batch-decode' },
     ];

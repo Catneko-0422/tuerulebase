@@ -1,141 +1,280 @@
 import { useState, useEffect } from 'react';
-import type { ChangeEvent } from 'react';
 import { rulesService } from '@/services/rules';
 import type { CodingNode } from '@/types/rules';
+
+// 定義一個穩定的空陣列常數，避免 useEffect 無限迴圈
+const EMPTY_NODES: CodingNode[] = [];
 
 interface RuleNodeProps {
   ruleId: number;
   parentId: number | null;
-  onNodeSelect: (node: CodingNode, value: string) => void;
   level: number;
+  onSegmentChange: (level: number, node: CodingNode | null, value: string) => void;
+  injectedNodes?: CodingNode[]; // 從上一層傳遞下來的節點 (處理兄弟節點順序)
 }
 
-export default function RuleNode({ ruleId, parentId, onNodeSelect, level }: RuleNodeProps) {
-  const [nodes, setNodes] = useState<CodingNode[]>([]);
+export default function RuleNode({ ruleId, parentId, level, onSegmentChange, injectedNodes = EMPTY_NODES }: RuleNodeProps) {
+  const [displayNodes, setDisplayNodes] = useState<CodingNode[]>([]);
+  const [deferredNodes, setDeferredNodes] = useState<CodingNode[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
-  const [selectedValue, setSelectedValue] = useState('');
+  
+  // 當前層級的選擇狀態
   const [selectedNode, setSelectedNode] = useState<CodingNode | null>(null);
   const [inputValue, setInputValue] = useState('');
 
+  // 1. 載入與分流節點
   useEffect(() => {
-    const fetchNodes = async () => {
+    let isMounted = true;
+    const fetchAndProcessNodes = async () => {
       setIsLoading(true);
       setError('');
       try {
-        const response = await rulesService.getNodes(ruleId, parentId);
-        setNodes(response.data);
+        // 只有當有 parentId 或者它是根節點且沒有注入節點時才去 fetch
+        let fetchedNodes: CodingNode[] = [];
+        if (parentId !== null || (level === 0 && injectedNodes.length === 0)) {
+             const res = await rulesService.getNodes(ruleId, parentId);
+             fetchedNodes = res.data;
+        }
+
+        if (isMounted) {
+          const allNodes = [...fetchedNodes, ...injectedNodes];
+          
+          // 分流邏輯：
+          // 1. 找出所有 "選項" (OPTION)
+          // 2. 如果有選項，則本層級只顯示選項，其他節點 (INPUT, STATIC 等) 暫存到下一層 (deferred)
+          // 3. 如果沒有選項，則本層級顯示 "第一個" 節點 (線性流程)，剩下的暫存到下一層
+          
+          const options = allNodes.filter(n => n.node_type === 'OPTION');
+          const others = allNodes.filter(n => n.node_type !== 'OPTION');
+
+          if (options.length > 0) {
+            // Case A: 選擇題 (Selection)
+            // 顯示所有選項，非選項的節點往後推
+            setDisplayNodes(options);
+            setDeferredNodes(others);
+          } else {
+            // Case B: No explicit Options (e.g. Categories, or just one node)
+            // Treat ALL nodes as alternatives (Display all)
+            // 修正：如果沒有 OPTION，但有多個節點 (如多個 STATIC 分類)，應全部顯示供選擇，而非只顯示第一個
+            setDisplayNodes(allNodes);
+            setDeferredNodes([]);
+          }
+          
+          // 重置選擇
+          setSelectedNode(null);
+          setInputValue('');
+        }
       } catch (err) {
-        setError('Failed to load rule nodes.');
-        console.error(err);
+        if (isMounted) setError('Failed to load nodes');
       } finally {
-        setIsLoading(false);
+        if (isMounted) setIsLoading(false);
       }
     };
 
-    fetchNodes();
-  }, [ruleId, parentId]);
+    fetchAndProcessNodes();
+    return () => { isMounted = false; };
+  }, [ruleId, parentId, injectedNodes, level]); // injectedNodes 現在是穩定的，不會導致迴圈
 
-  const handleStaticSelect = (e: ChangeEvent<HTMLSelectElement>) => {
+  // 2. 自動選擇邏輯 (針對 FIXED 和 STATIC)
+  useEffect(() => {
+    if (displayNodes.length === 1) {
+      const node = displayNodes[0];
+      
+      // STATIC: 自動選取 (作為標題)，但不填值 (value='')
+      if (node.node_type === 'STATIC') {
+        if (selectedNode?.id !== node.id) {
+          setSelectedNode(node);
+          onSegmentChange(level, node, ''); 
+        }
+      }
+    }
+  }, [displayNodes, level, onSegmentChange, selectedNode]);
+
+  // 處理下拉選單變更
+  const handleSelectChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const nodeId = parseInt(e.target.value, 10);
-    const node = nodes.find(n => n.id === nodeId);
+    const node = displayNodes.find(n => n.id === nodeId);
     if (node) {
-      setSelectedValue(e.target.value);
       setSelectedNode(node);
-      onNodeSelect(node, node.code!);
+      setInputValue('');
+      onSegmentChange(level, node, node.code || '');
     }
   };
 
-  const handleInputChange = (e: ChangeEvent<HTMLInputElement>) => {
-    const node = nodes[0]; // Assuming only one INPUT node per level
-    if (!node) return;
-    setInputValue(e.target.value);
+  // 處理輸入框變更
+  const handleInputChange = (node: CodingNode) => (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setInputValue(val);
 
-    // Basic validation against segment length
-    if (e.target.value.length === node.segment_length) {
-      // More complex regex validation could be added here
+    // 當開始輸入時，立即將此節點設為選取狀態，以便 input value 能正確綁定
+    if (selectedNode?.id !== node.id) {
       setSelectedNode(node);
-      onNodeSelect(node, e.target.value);
+    }
+    
+    // 驗證長度是否符合
+    if (val.length === node.segment_length) {
+      onSegmentChange(level, node, val);
+    } else {
+      // 輸入中但長度未符，回報空值给父層，但保持 selectedNode 以維持 UI 狀態
+      onSegmentChange(level, null, '');
     }
   };
 
-  if (isLoading) {
-    return <div className="p-4 text-slate-500">Loading layer {level}...</div>;
+  if (isLoading) return <div className="p-4 text-slate-400 text-sm">Loading...</div>;
+  if (error) return <div className="p-4 text-red-500 text-sm">{error}</div>;
+  if (displayNodes.length === 0) return null;
+
+  // --- 渲染邏輯 ---
+
+  // 情況 A: 單一節點 (Linear Step)
+  if (displayNodes.length === 1) {
+    const node = displayNodes[0];
+
+    // A1. STATIC (分類標題): 顯示標題，直接渲染下一層
+    if (node.node_type === 'STATIC') {
+      return (
+        // 使用 Fragment 避免視覺巢狀結構，並加入分隔線
+        <>
+          <div className="flex items-center gap-4 my-4">
+            <div className="h-px bg-slate-200 flex-1"></div>
+            <span className="text-sm font-semibold text-slate-500">{node.name}</span>
+            <div className="h-px bg-slate-200 flex-1"></div>
+          </div>
+          {/* 直接渲染下一層，不包在任何 div 中 */}
+            <RuleNode 
+              ruleId={ruleId} 
+              parentId={node.id} 
+              level={level + 1} 
+              onSegmentChange={onSegmentChange}
+              injectedNodes={deferredNodes}
+            />
+        </>
+      );
+    }
+
+    // A2. FIXED (固定值): 顯示為唯讀，直接渲染下一層
+    if (node.node_type === 'FIXED') {
+      const isSelected = selectedNode?.id === node.id;
+      return (
+        <>
+          <div 
+            className={`flex items-center gap-2 p-3 border rounded-lg cursor-pointer transition-colors ${isSelected ? 'bg-blue-100 border-blue-300 ring-2 ring-blue-200' : 'bg-white border-slate-200 hover:border-blue-300'}`}
+            onClick={() => {
+              setSelectedNode(node);
+              onSegmentChange(level, node, node.code || '');
+            }}
+          >
+            <span className={`font-medium flex-1 ${isSelected ? 'text-blue-800' : 'text-slate-700'}`}>{node.name}</span>
+            <span className={`font-mono px-2 py-0.5 rounded text-sm border ${isSelected ? 'bg-white text-blue-700 border-blue-200' : 'bg-slate-100 text-slate-600 border-slate-200'}`}>
+              {node.code}
+            </span>
+          </div>
+          {/* 視覺分隔線 */}
+          {isSelected && <div className="h-8 w-px bg-slate-200 mx-auto"></div>}
+
+          {selectedNode && (
+            // 直接渲染，不包 div
+              <RuleNode 
+                ruleId={ruleId} 
+                parentId={node.id} 
+                level={level + 1} 
+                onSegmentChange={onSegmentChange}
+                injectedNodes={deferredNodes}
+              />
+          )}
+        </>
+      );
+    }
+
+    // A3. INPUT / SERIAL: 顯示輸入框
+    if (['INPUT', 'SERIAL'].includes(node.node_type)) {
+      return (
+        <>
+          <label className="block text-sm font-bold text-slate-700 mb-2">
+            {node.name}
+            {node.node_type === 'SERIAL' && <span className="ml-2 text-xs font-normal text-slate-500">(流水號)</span>}
+          </label>
+          <input
+            type="text"
+            value={inputValue}
+            onChange={handleInputChange(node)}
+            maxLength={node.segment_length}
+            placeholder={`Enter ${node.segment_length} characters`}
+            className="w-full p-2 border border-slate-300 rounded focus:ring-2 focus:ring-indigo-500 outline-none font-mono"
+          />
+          {/* 視覺分隔線 */}
+          {selectedNode && <div className="h-8 w-px bg-slate-200 mx-auto"></div>}
+
+          {selectedNode && (
+            // 直接渲染，不包 div
+              <RuleNode 
+                ruleId={ruleId} 
+                parentId={node.id} 
+                level={level + 1} 
+                onSegmentChange={onSegmentChange}
+                injectedNodes={deferredNodes}
+              />
+          )}
+        </>
+      );
+    }
   }
 
-  if (error) {
-    return <div className="p-4 text-red-500">{error}</div>;
-  }
-
-  if (nodes.length === 0) {
-    return null; // End of the line
-  }
-
-  // 如果只有一個節點且是 FIXED 類型，自動選取並顯示
-  if (nodes.length === 1 && nodes[0].node_type === 'FIXED') {
-     // 這裡可以做自動選取的邏輯，但為了避免無限迴圈，通常由使用者確認或在 useEffect 處理
-     // 暫時先顯示為唯讀輸入框
-     // 若要自動選取，需小心處理 onSelect 的觸發時機
-  }
-
-  // Determine node type for this level
-  const nodeType = nodes[0].node_type;
-  const nodeName = nodes[0].name;
+  // 情況 B: 多重節點 (Multiple Options) -> 顯示下拉選單 + 輸入框 (混合支援)
+  const selectNodes = displayNodes.filter(n => ['STATIC', 'FIXED', 'OPTION'].includes(n.node_type));
+  const inputNodes = displayNodes.filter(n => ['INPUT', 'SERIAL'].includes(n.node_type));
 
   return (
-    <div className="p-4 border-l-4 border-slate-200 ml-4 mb-4 bg-white/50 rounded-r-lg">
+    <>
       <label className="block text-sm font-bold text-slate-700 mb-2">
-        Layer {level}: {nodeName}
+        請選擇 (Select Option)
       </label>
-
-      {nodeType === 'STATIC' && (
+      
+      {selectNodes.length > 0 && (
         <select
-          value={selectedValue}
-          onChange={handleStaticSelect}
-          className="w-full p-2 border border-slate-300 rounded-md bg-white focus:ring-2 focus:ring-indigo-500 outline-none"
+          value={selectedNode?.id || ''}
+          onChange={handleSelectChange}
+          className="w-full p-2 border border-slate-300 rounded bg-white focus:ring-2 focus:ring-indigo-500 outline-none"
         >
-          <option value="" disabled>-- Select an option --</option>
-          {nodes.map(node => (
-            // 只顯示 FIXED 類型的子節點作為選項
-            node.node_type === 'FIXED' && (
-              <option key={node.id} value={node.id}>{node.name} ({node.code})</option>
-            )
+          <option value="" disabled>-- Select --</option>
+          {selectNodes.map(node => (
+            <option key={node.id} value={node.id}>
+              {node.name} {node.code ? `(${node.code})` : ''}
+            </option>
           ))}
         </select>
       )}
 
-      {nodeType === 'INPUT' && (
-        <input
-          type="text"
-          value={inputValue}
-          onChange={handleInputChange}
-          maxLength={nodes[0].segment_length}
-          placeholder={nodes[0].value_placeholder || `Enter ${nodes[0].segment_length} characters`}
-          className="w-full p-2 border border-slate-300 rounded-md focus:ring-2 focus:ring-indigo-500 outline-none font-mono"
-        />
-      )}
-
-      {nodeType === 'SERIAL' && (
-        <div className="p-2 bg-slate-200 text-slate-600 rounded-md font-mono">
-          [System Generated Serial: {nodes[0].segment_length} digits]
+      {inputNodes.map(node => (
+        <div key={node.id} className="mt-3">
+          <label className="block text-xs font-medium text-slate-500 mb-1">
+            {node.name} {node.node_type === 'SERIAL' && '(流水號)'}
+          </label>
+          <input
+            type="text"
+            value={selectedNode?.id === node.id ? inputValue : ''}
+            onChange={handleInputChange(node)}
+            maxLength={node.segment_length}
+            placeholder={`Enter ${node.segment_length} characters`}
+            className="w-full p-2 border border-slate-300 rounded focus:ring-2 focus:ring-indigo-500 outline-none font-mono"
+          />
         </div>
-      )}
+      ))}
 
-      {nodeType === 'FIXED' && nodes.length === 1 && (
-         <div className="p-2 bg-gray-100 text-gray-700 rounded-md font-mono border border-gray-300">
-            {nodes[0].name} ({nodes[0].code}) [Fixed]
-         </div>
-      )}
+      {/* 視覺分隔線 */}
+      {selectedNode && <div className="h-8 w-px bg-slate-200 mx-auto"></div>}
 
-      {/* Recursive call to render the next level */}
-      {selectedNode && selectedNode.has_children && (
-        <RuleNode
-          ruleId={ruleId}
-          parentId={selectedNode.id}
-          onNodeSelect={onNodeSelect}
-          level={level + 1}
-        />
+      {selectedNode && (
+        // 直接渲染，不包 div
+          <RuleNode 
+            ruleId={ruleId} 
+            parentId={selectedNode.id} 
+            level={level + 1} 
+            onSegmentChange={onSegmentChange}
+            injectedNodes={deferredNodes}
+          />
       )}
-    </div>
+    </>
   );
 }

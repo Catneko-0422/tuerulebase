@@ -310,7 +310,7 @@ function TreeNode({ node, onAddChild, onDelete, treeVersion, currentTotalLength,
 
       {isMaxLengthReached && (
         <div className="mt-4 mb-2 overflow-x-auto">
-          <table className="min-w-full border-collapse border border-slate-300 text-sm">
+          <table className="min-w-max w-full border-collapse border border-slate-300 text-sm">
             <thead>
               <tr className="bg-slate-100">
                 {path.map((n, i) => (
@@ -323,7 +323,7 @@ function TreeNode({ node, onAddChild, onDelete, treeVersion, currentTotalLength,
             <tbody>
               <tr>
                 {path.map((n, i) => (
-                  <td key={i} className="border border-slate-300 px-2 py-1 text-center text-slate-500 font-mono">
+                  <td key={i} className="border border-slate-300 px-2 py-1 text-center text-slate-500 font-mono whitespace-nowrap">
                     {'x'.repeat(n.segment_length)}
                   </td>
                 ))}
