@@ -1,0 +1,28 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Environment variables
+.env
+
+# Flask instance folder
+instance/
+
+# Logs
+*.log
+
+# IDE settings
+.vscode/
+.idea/
+
+# Testing and Coverage
+.coverage
+htmlcov/
+.pytest_cache/

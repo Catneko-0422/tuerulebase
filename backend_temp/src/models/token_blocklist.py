@@ -1,0 +1,12 @@
+from src.extensions import db
+from datetime import datetime, timezone
+
+class TokenBlocklist(db.Model):
+    __tablename__ = 'token_blocklist'
+
+    id = db.Column(db.Integer, primary_key=True)
+    jti = db.Column(db.String(36), nullable=False, index=True) # Token 的唯一身分證號
+    created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+    def __repr__(self):
+        return f'<TokenBlocklist {self.jti}>'
