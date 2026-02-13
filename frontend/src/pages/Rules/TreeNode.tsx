@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import type { CodingNode } from '@/types/rules';
 import { rulesService } from '@/services/rules';
-import OptionsModal from './OptionsModal';
+import OptionsModal from '@/pages/Rules/components/OptionsModal';
 
 const MAX_CODE_LENGTH = 16;
 
